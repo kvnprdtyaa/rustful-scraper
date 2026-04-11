@@ -1,85 +1,49 @@
-use reqwest;
-use scraper::{Html, Selector};
-use serde::Serialize;
-use std::{error::Error, fs::File};
+mod scrapers;
 
-#[derive(Debug,Serialize)]
-struct Quote {
-    text: String,
-    author: String,
-}
+use std::{env, error::Error, io::{self, Write}};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut page = 1;
-    let base_url = "https://quotes.toscrape.com/page/{}/";
-    let mut quotes: Vec<Quote> = Vec::new();
+    let args: Vec<String> = env::args().collect();
 
-    loop {
-        let url = base_url.replace("{}", &page.to_string());
-        println!("Fetching page {}: {}", page, url);
+    let choice = if let Some(arg) = args.get(1) {
+        arg.clone()
+    } else {
+        println!("=== Rustful Scraper ===");
+        println!("Available scrapers:");
+        println!("  1. quotes  - Scrape quotes from quotes.toscrape.com");
+        println!("  2. books   - Scrape books from books.toscrape.com");
+        println!();
+        print!("Enter scraper name or number (1/2): ");
+        io::stdout().flush()?;
 
-        let response = reqwest::get(url).await?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim().to_string();
 
-        if !response.status().is_success() {
-            println!("No more pages found (HTTP({}))", response.status());
-            break;
+        match input.as_str() {
+            "1" => "quotes".to_string(),
+            "2" => "books".to_string(),
+            other => other.to_string(),
         }
+    };
 
-        let html = response.text().await?;
-        let document = Html::parse_document(&html);
-
-        let quote_selector = Selector::parse(".quote").unwrap();
-        let text_selector = Selector::parse(".text").unwrap();
-        let author_selector = Selector::parse(".author").unwrap();
-        let next_selector = Selector::parse(".next > a").unwrap();
-
-        let mut found_quotes = 0;
-
-        for quote in document.select(&quote_selector) {
-            let text = quote.select(&text_selector).next().map(|t| t.text().collect::<Vec<_>>().join("")).unwrap_or_default();
-            let author = quote.select(&author_selector).next().map(|t| t.text().collect::<Vec<_>>().join("")).unwrap_or_default();
-
-            quotes.push(Quote { text, author });
-            found_quotes += 1;
+    match choice.as_str() {
+        "quotes" => {
+            println!("\nRunning Quotes scraper (quotes.toscrape.com)...\n");
+            scrapers::quotestoscrape::run().await?;
         }
-
-        println!("\nScraped {} quotes on page {}", found_quotes, page);
-
-        let has_next = document.select(&next_selector).next().is_some();
-
-        if has_next {
-            page += 1;
-        } else {
-            println!("\nNo more quotes to scrape.");
-            break;
+        // "books" => {
+        //     println!("\nRunning Books scraper (books.toscrape.com)...\n");
+        //     scrapers::books::run().await?;
+        // }
+        other => {
+            eprintln!("Unknown scraper: '{}'", other);
+            eprintln!("Available scrapers: quotes, books");
+            eprintln!("Usage: cargo run -- <scraper>");
+            std::process::exit(1);
         }
     }
-
-    println!("\nTotal quotes scraped {}.", quotes.len());
-
-    save_to_json(&quotes)?;
-    save_to_csv(&quotes)?;
-
-    println!("\nData saved to quotes.json and quotes.csv\n");
-    Ok(())
-}
-
-fn save_to_json(quotes: &Vec<Quote>) -> Result<(), Box<dyn Error>> {
-    let file = File::create("quotes.json")?;
-    
-    serde_json::to_writer_pretty(file, quotes)?;
-    Ok(())
-}
-
-fn save_to_csv(quotes: &Vec<Quote>) -> Result<(), Box<dyn Error>> {
-    let mut writer = csv::Writer::from_path("quotes.csv")?;
-
-    for quote in quotes {
-        writer.serialize(quote)?;
-    }
-
-    writer.flush()?;
 
     Ok(())
 }
